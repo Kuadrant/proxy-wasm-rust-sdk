@@ -16,7 +16,7 @@
 name = "proxy-wasm"
 version = "0.2.5"
 authors = ["Piotr Sikora <piotrsikora@google.com>"]
-rust-version = "1.68"
+rust-version = "1.76"
 description = "WebAssembly for Proxies"
 readme = "README.md"
 license = "Apache-2.0"
@@ -43,3 +43,9 @@ debug = true
 [profile.bench]
 inherits = "release"
 debug = true
+[lints.clippy]
+panic = "deny"
+#eventually clean all these up as well
+#unwrap_used = "deny"
+#expect_used = "deny"
+#indexing_slicing = "deny"
