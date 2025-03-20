@@ -171,7 +171,7 @@ pub fn get_map(map_type: MapType) -> Result<Vec<(String, String)>, Status> {
             Status::Ok => {
                 if !return_data.is_null() {
                     let serialized_map = Vec::from_raw_parts(return_data, return_size, return_size);
-                    Ok(utils::deserialize_map(&serialized_map))
+                    utils::deserialize_map(&serialized_map)
                 } else {
                     Ok(Vec::new())
                 }
@@ -189,7 +189,7 @@ pub fn get_map_bytes(map_type: MapType) -> Result<Vec<(String, Bytes)>, Status> 
             Status::Ok => {
                 if !return_data.is_null() {
                     let serialized_map = Vec::from_raw_parts(return_data, return_size, return_size);
-                    Ok(utils::deserialize_map_bytes(&serialized_map))
+                    utils::deserialize_map_bytes(&serialized_map)
                 } else {
                     Ok(Vec::new())
                 }
@@ -258,7 +258,7 @@ pub fn get_map_value(map_type: MapType, key: &str) -> Result<Option<String>, Sta
                             return_size,
                             return_size,
                         ))
-                        .unwrap(),
+                        .map_err(|_| Status::SerializationFailure)?,
                     ))
                 } else {
                     Ok(Some(String::new()))
@@ -1048,7 +1048,7 @@ pub fn get_grpc_status() -> Result<(u32, Option<String>), Status> {
                                 return_size,
                                 return_size,
                             ))
-                            .unwrap(),
+                            .map_err(|_| Status::SerializationFailure)?,
                         ),
                     ))
                 } else {
@@ -1215,6 +1215,7 @@ mod mocks {
         return_map_data: *mut *mut u8,
         return_map_size: *mut usize,
     ) -> Status {
+        #[allow(clippy::unwrap_used)]
         let layout = Layout::array::<u8>(SERIALIZED_MAP.len()).unwrap();
         unsafe {
             *return_map_data = alloc(layout);
@@ -1252,7 +1253,7 @@ mod tests {
 }
 
 mod utils {
-    use crate::types::Bytes;
+    use crate::types::{Bytes, Status};
     use std::convert::TryFrom;
 
     pub(super) fn serialize_property_path(path: Vec<&str>) -> Bytes {
@@ -1312,49 +1313,64 @@ mod utils {
         bytes
     }
 
-    pub(super) fn deserialize_map(bytes: &[u8]) -> Vec<(String, String)> {
+    pub(super) fn deserialize_map(bytes: &[u8]) -> Result<Vec<(String, String)>, Status> {
         if bytes.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
-        let size = u32::from_le_bytes(<[u8; 4]>::try_from(&bytes[0..4]).unwrap()) as usize;
+        let size = u32::from_le_bytes(
+            <[u8; 4]>::try_from(&bytes[0..4]).map_err(|_| Status::SerializationFailure)?,
+        ) as usize;
         let mut map = Vec::with_capacity(size);
         let mut p = 4 + size * 8;
         for n in 0..size {
             let s = 4 + n * 8;
-            let size = u32::from_le_bytes(<[u8; 4]>::try_from(&bytes[s..s + 4]).unwrap()) as usize;
+            let size = u32::from_le_bytes(
+                <[u8; 4]>::try_from(&bytes[s..s + 4]).map_err(|_| Status::SerializationFailure)?,
+            ) as usize;
             let key = bytes[p..p + size].to_vec();
             p += size + 1;
-            let size =
-                u32::from_le_bytes(<[u8; 4]>::try_from(&bytes[s + 4..s + 8]).unwrap()) as usize;
+            let size = u32::from_le_bytes(
+                <[u8; 4]>::try_from(&bytes[s + 4..s + 8])
+                    .map_err(|_| Status::SerializationFailure)?,
+            ) as usize;
             let value = bytes[p..p + size].to_vec();
             p += size + 1;
             map.push((
-                String::from_utf8(key).unwrap(),
-                String::from_utf8(value).unwrap(),
+                String::from_utf8(key).map_err(|_| Status::SerializationFailure)?,
+                String::from_utf8(value).map_err(|_| Status::SerializationFailure)?,
             ));
         }
-        map
+        Ok(map)
     }
 
-    pub(super) fn deserialize_map_bytes(bytes: &[u8]) -> Vec<(String, Bytes)> {
+    pub(super) fn deserialize_map_bytes(bytes: &[u8]) -> Result<Vec<(String, Bytes)>, Status> {
         if bytes.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
-        let size = u32::from_le_bytes(<[u8; 4]>::try_from(&bytes[0..4]).unwrap()) as usize;
+        let size = u32::from_le_bytes(
+            <[u8; 4]>::try_from(&bytes[0..4]).map_err(|_| Status::SerializationFailure)?,
+        ) as usize;
         let mut map = Vec::with_capacity(size);
         let mut p = 4 + size * 8;
         for n in 0..size {
             let s = 4 + n * 8;
-            let size = u32::from_le_bytes(<[u8; 4]>::try_from(&bytes[s..s + 4]).unwrap()) as usize;
+            let size = u32::from_le_bytes(
+                <[u8; 4]>::try_from(&bytes[s..s + 4]).map_err(|_| Status::SerializationFailure)?,
+            ) as usize;
             let key = bytes[p..p + size].to_vec();
             p += size + 1;
-            let size =
-                u32::from_le_bytes(<[u8; 4]>::try_from(&bytes[s + 4..s + 8]).unwrap()) as usize;
+            let size = u32::from_le_bytes(
+                <[u8; 4]>::try_from(&bytes[s + 4..s + 8])
+                    .map_err(|_| Status::SerializationFailure)?,
+            ) as usize;
             let value = bytes[p..p + size].to_vec();
             p += size + 1;
-            map.push((String::from_utf8(key).unwrap(), value));
+            map.push((
+                String::from_utf8(key).map_err(|_| Status::SerializationFailure)?,
+                value,
+            ));
         }
-        map
+        Ok(map)
     }
 
     #[cfg(test)]
@@ -1416,17 +1432,17 @@ mod utils {
         #[test]
         fn test_deserialize_map_empty() {
             let map = deserialize_map(&[]);
-            assert_eq!(map, []);
+            assert!(matches!(map, Ok(map) if map.is_empty()));
             let map = deserialize_map(&[0, 0, 0, 0]);
-            assert_eq!(map, []);
+            assert!(matches!(map, Ok(map) if map.is_empty()));
         }
 
         #[test]
         fn test_deserialize_map_empty_bytes() {
             let map = deserialize_map_bytes(&[]);
-            assert_eq!(map, []);
+            assert!(matches!(map, Ok(map) if map.is_empty()));
             let map = deserialize_map_bytes(&[0, 0, 0, 0]);
-            assert_eq!(map, []);
+            assert!(matches!(map, Ok(map) if map.is_empty()));
         }
 
         #[test]
@@ -1445,41 +1461,45 @@ mod utils {
         #[test]
         fn test_deserialize_map() {
             let map = deserialize_map(SERIALIZED_MAP);
-            assert_eq!(map.len(), MAP.len());
-            for (got, expected) in map.into_iter().zip(MAP) {
-                assert_eq!(got.0, expected.0);
-                assert_eq!(got.1, expected.1);
-            }
+            assert!(matches!(map, Ok(ref map) if {
+                map.len() == MAP.len() &&
+                map.iter().zip(MAP).all(|(got, expected)| {
+                    got.0 == expected.0 && got.1 == expected.1
+                })
+            }));
         }
 
         #[test]
         fn test_deserialize_map_bytes() {
             let map = deserialize_map_bytes(SERIALIZED_MAP);
-            assert_eq!(map.len(), MAP.len());
-            for (got, expected) in map.into_iter().zip(MAP) {
-                assert_eq!(got.0, expected.0);
-                assert_eq!(got.1, expected.1.as_bytes());
-            }
+            assert!(matches!(map, Ok(ref map) if {
+                map.len() == MAP.len() &&
+                map.iter().zip(MAP).all(|(got, expected)| {
+                    got.0 == expected.0 && got.1 == expected.1.as_bytes()
+                })
+            }));
         }
 
         #[test]
         fn test_deserialize_map_roundtrip() {
             let map = deserialize_map(SERIALIZED_MAP);
             // TODO(v0.3): fix arguments, so that maps can be reused without conversion.
-            let map_refs: Vec<(&str, &str)> =
-                map.iter().map(|x| (x.0.as_ref(), x.1.as_ref())).collect();
-            let serialized_map = serialize_map(&map_refs);
-            assert_eq!(serialized_map, SERIALIZED_MAP);
+            assert!(matches!(map, Ok(ref map) if {
+                let map_refs: Vec<(&str, &str)> =
+                    map.iter().map(|x| (x.0.as_ref(), x.1.as_ref())).collect();
+                serialize_map(&map_refs) == SERIALIZED_MAP
+            }));
         }
 
         #[test]
         fn test_deserialize_map_roundtrip_bytes() {
             let map = deserialize_map_bytes(SERIALIZED_MAP);
             // TODO(v0.3): fix arguments, so that maps can be reused without conversion.
-            let map_refs: Vec<(&str, &[u8])> =
-                map.iter().map(|x| (x.0.as_ref(), x.1.as_ref())).collect();
-            let serialized_map = serialize_map_bytes(&map_refs);
-            assert_eq!(serialized_map, SERIALIZED_MAP);
+            assert!(matches!(map, Ok(ref map) if {
+                let map_refs: Vec<(&str, &[u8])> =
+                    map.iter().map(|x| (x.0.as_ref(), x.1.as_ref())).collect();
+                serialize_map_bytes(&map_refs) == SERIALIZED_MAP
+            }));
         }
 
         #[test]
@@ -1489,18 +1509,16 @@ mod utils {
                 let serialized_src = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 99, 0, i, 0];
                 let map = deserialize_map(&serialized_src);
                 // TODO(v0.3): fix arguments, so that maps can be reused without conversion.
-                let map_refs: Vec<(&str, &str)> =
-                    map.iter().map(|x| (x.0.as_ref(), x.1.as_ref())).collect();
-                let serialized_map = serialize_map(&map_refs);
-                assert_eq!(serialized_map, serialized_src);
+                assert!(matches!(map, Ok(ref map) if {
+                    let map_refs: Vec<(&str, &str)> =
+                        map.iter().map(|x| (x.0.as_ref(), x.1.as_ref())).collect();
+                    serialize_map(&map_refs) == serialized_src
+                }));
             }
             // 0x80-0xff are invalid single-byte UTF-8 characters.
             for i in 0x80..0xff {
                 let serialized_src = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 99, 0, i, 0];
-                std::panic::set_hook(Box::new(|_| {}));
-                let result = std::panic::catch_unwind(|| {
-                    deserialize_map(&serialized_src);
-                });
+                let result = deserialize_map(&serialized_src);
                 assert!(result.is_err());
             }
         }
@@ -1512,10 +1530,11 @@ mod utils {
                 let serialized_src = [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 99, 0, i, 0];
                 let map = deserialize_map_bytes(&serialized_src);
                 // TODO(v0.3): fix arguments, so that maps can be reused without conversion.
-                let map_refs: Vec<(&str, &[u8])> =
-                    map.iter().map(|x| (x.0.as_ref(), x.1.as_ref())).collect();
-                let serialized_map = serialize_map_bytes(&map_refs);
-                assert_eq!(serialized_map, serialized_src);
+                assert!(matches!(map, Ok(ref map) if {
+                    let map_refs: Vec<(&str, &[u8])> =
+                        map.iter().map(|x| (x.0.as_ref(), x.1.as_ref())).collect();
+                    serialize_map_bytes(&map_refs) == serialized_src
+                }));
             }
         }
 
